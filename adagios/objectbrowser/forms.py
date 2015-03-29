@@ -52,6 +52,10 @@ HOST_NOTIFICATION_OPTIONS = (
     ('s', 'scheduled_downtime')
 )
 
+# These attributes can be exclude on forms
+# because they are related with Pynag objects not with Shinken/Nagios objects.
+PYNAG_ATTRIBUTES = ('meta', 'id', 'shortname', 'effective_command_line')
+
 # All objects definition types in our config, in a form that is good for pynag forms
 ALL_OBJECT_TYPES = sorted(map(lambda x: (x, x), Model.string_to_class.keys()))
 
@@ -488,7 +492,7 @@ class AdvancedEditForm(AdagiosForm):
         object_type = pynag_object['object_type']
         all_attributes = sorted(object_definitions.get(object_type).keys())
         for field_name in self.pynag_object.keys() + all_attributes:
-            if field_name == 'meta':
+            if field_name in PYNAG_ATTRIBUTES:
                 continue
             help_text = ""
             if field_name in object_definitions[object_type]:
@@ -685,6 +689,26 @@ class BaseBulkForm(AdagiosForm):
 class BulkEditForm(BaseBulkForm):
     attribute_name = forms.CharField()
     new_value = forms.CharField()
+
+    def __init__(self, *args, **kwargs):
+        BaseBulkForm.__init__(self, *args, **kwargs)
+        common_attrs = []
+        for k, v in self.data.items():
+            if k.startswith('change_'):
+                object_id = k[len("change_"):]
+                obj = Model.ObjectDefinition.objects.get_by_id(object_id)
+                # Get all attributes for objects selected
+                obj_attrs = obj.keys()
+                if not common_attrs:
+                    common_attrs = obj_attrs
+                else:
+                    # Keep only common attributes between objects
+                    common_attrs = list(set(common_attrs) & set(obj_attrs))
+        # Exclude PYNAG_ATTRIBUTES of common attributes
+        choices = filter(lambda x: x not in PYNAG_ATTRIBUTES, common_attrs)
+        choices = [('', '')] + map(lambda x: (x, x), choices)
+        self.fields['attribute_name'] = forms.ChoiceField(
+            choices=sorted(choices))
 
     def save(self):
         for i in self.changed_objects:
